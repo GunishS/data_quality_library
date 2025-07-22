@@ -9,10 +9,15 @@ from pyspark.sql.functions import col, lit, isnan
 from pyspark.sql.types import NumericType
 from datetime import datetime
 import pyspark.sql.functions as F
+from .config import config
 
-path_for_error_tbl = "dev.silver_ods"
+# path of your choice where you want to save the error table.
+catalog = "dev" # eg : dev, test, prod etc.
+schema = "silver_ods" # eg
+path_for_error_tbl = f"{catalog}.{schema}" 
 
-def run_dq_checks_df(fact_df, fact_table_name, config):
+
+def run_dq_checks_df(fact_df, fact_table_name, config=config):
     error_dfs = []
     schema = fact_df.schema
 
@@ -142,7 +147,7 @@ def run_dq_checks_df(fact_df, fact_table_name, config):
         "testing_ts": datetime.now()
     }])
 
-    summary_df.write.mode("append").format("delta").saveAsTable("dev.silver_ods.dq_check")
+    summary_df.write.mode("append").format("delta").saveAsTable(f"{catalog}.{schema}.dq_check")
 
     # ================== 6. Return Good Records ==================
     if error_df:
@@ -153,8 +158,7 @@ def run_dq_checks_df(fact_df, fact_table_name, config):
 
 
 
-
-def run_dq_checks_vw(fact_table_name, config):
+def run_dq_checks_vw(fact_table_name, config=config):
     """
     Run data quality checks on a Spark view/table specified by `fact_table_name`.
     Error records are saved to <table_name>_error and summary to dev.silver_ods.dq_check.
