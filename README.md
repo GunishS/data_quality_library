@@ -54,4 +54,6 @@ This clean DataFrame can then be forwarded downstream for analytics, ML training
 ## 🔧 Installation
 
 Install directly using pip (GitHub-based install):
+pip install git+https://github.com/GunishS/data_quality_library.git
+
 
