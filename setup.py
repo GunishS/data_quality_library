@@ -9,5 +9,10 @@ setup(
     install_requires=[
         "pyspark"
     ],
-    python_requires=">=3.7"
+    keywords=['data quaity','data testing','quality of data']
+    python_requires=">=3.7",
+    classifiers=[
+        "Development Status :: Testing",
+        "Intented Audience :: Developers"
+    ]
 )
