@@ -279,7 +279,7 @@ def run_dq_checks_vw(fact_table_name, config=config):
 
     # ================== 5. Append Summary to dq_check ==================
     summary_df = spark.createDataFrame([{
-        "fact_table": fact_table_name,
+        "table_name": fact_table_name,
         "null_check_passed": null_check_passed,
         "null_violations": null_violation_result,
         "range_violations": range_violation_count,
