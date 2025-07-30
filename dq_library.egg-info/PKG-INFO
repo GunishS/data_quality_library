@@ -1,0 +1,15 @@
+Metadata-Version: 2.1
+Name: dq-library
+Version: 0.1.0
+Summary: A Python library for data quality checks for different layers that can be intregated and used with multiple artifacts like data pipeline, notebook etc.
+Author: Gunish Swarnkar
+Author-email: gunish99@gmail.com
+License: UNKNOWN
+Keywords: data quaity,data testing,quality of data
+Platform: UNKNOWN
+Classifier: Development Status :: 4 - Beta
+Requires-Python: >=3.7
+License-File: LICENSE
+
+UNKNOWN
+
