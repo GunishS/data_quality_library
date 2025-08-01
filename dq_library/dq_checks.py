@@ -10,6 +10,8 @@ from pyspark.sql.types import NumericType
 from datetime import datetime
 import pyspark.sql.functions as F
 from .config import config
+from functools import reduce
+
 
 # path of your choice where you want to save the error table.
 catalog = "dev" # eg : dev, test, prod etc.
@@ -17,34 +19,43 @@ schema = "silver_ods" # eg
 path_for_error_tbl = f"{catalog}.{schema}" 
 
 
-def run_dq_checks_df(fact_df, fact_table_name, config=config):
+def run_dq_checks_df(fact_df, fact_table_name, config, catalog='dev', schema='silver_ods'):
     error_dfs = []
-    schema = fact_df.schema
+    df_schema = fact_df.schema
 
-    # ================== 1. Null Checks ==================
-    null_check_passed = True
-    null_violation_result = "Null check skipped"
+    # =========== Flags for which checks are enabled ==========
+    null_check_enabled = config.get("enable_null_check", True)
+    range_check_enabled = config.get("enable_range_check", True)
+    referential_check_enabled = config.get("enable_referential_check", True)
+
+    # =========== 1. Null Checks ==========
     null_violated_cols = []
+    null_errors_count = 0
 
-    if config.get("enable_null_check", True):
+    if null_check_enabled:
         pk_cols = [c for c in config.get("primary_keys", []) if c in fact_df.columns]
         for col_name in pk_cols:
-            if isinstance(schema[col_name].dataType, NumericType):
+            if isinstance(df_schema[col_name].dataType, NumericType):
                 null_count = fact_df.filter(col(col_name).isNull() | isnan(col(col_name))).limit(1).count()
             else:
                 null_count = fact_df.filter(col(col_name).isNull()).limit(1).count()
             if null_count > 0:
                 null_violated_cols.append(col_name)
 
-        null_check_passed = len(null_violated_cols) == 0
-        null_violation_result = "All primary keys passed" if null_check_passed else ", ".join(null_violated_cols)
+        if null_violated_cols:
+            null_conds = [
+                (col(c).isNull() | isnan(col(c))) if isinstance(df_schema[c].dataType, NumericType)
+                else col(c).isNull() for c in null_violated_cols
+            ]
+            null_errors_count = fact_df.filter(reduce(lambda a, b: a | b, null_conds)).count()
+            null_errors = fact_df.filter(reduce(lambda a, b: a | b, null_conds)).withColumn("dq_error_type", lit("Null Check"))
+            error_dfs.append(null_errors)
 
-    # ================== 2. Range Checks ==================
-    range_violation_count = 0
-    range_check_passed = True
+    # =========== 2. Range Checks ==========
+    range_errors_count = 0
     range_filter = None
 
-    if config.get("enable_range_check", True):
+    if range_check_enabled:
         try:
             range_filter = (
                 (col(config["date_column"]) < lit(config["date_min"])) |
@@ -52,24 +63,24 @@ def run_dq_checks_df(fact_df, fact_table_name, config=config):
                 (col(config["range_column"]) < lit(config["range_min"])) |
                 (col(config["range_column"]) > lit(config["range_max"]))
             )
-            range_violation_count = fact_df.filter(range_filter).count()
-            range_check_passed = range_violation_count == 0
+            range_errors_count = fact_df.filter(range_filter).count()
+            if range_errors_count > 0:
+                range_errors = fact_df.filter(range_filter).withColumn("dq_error_type", lit("Range Check"))
+                error_dfs.append(range_errors)
         except Exception as e:
-            print(f" Range check failed: {e}")
-            range_check_passed = False
+            print(f"Range check failed: {e}")
+            range_errors_count = 0
 
-    # ================== 3. Referential Checks ==================
-    referential_issues = []
+    # =========== 3. Referential Checks ==========
+    referential_errors_count = 0
     referential_missing_values = []
-    referential_check_passed = True
-    referential_status = "Referential check skipped"
+    referential_issues = []
 
-    if config.get("enable_referential_check", True):
+    if referential_check_enabled:
         for fk in config.get("foreign_keys", []):
             fk_col = fk["fk_column"]
             dim_table = fk["dim_table"]
             dim_fk_col = fk.get("dim_fk_column", fk_col)
-
             try:
                 dim_df = spark.table(dim_table)
                 missing_df = fact_df.select(fk_col).distinct().na.drop().join(
@@ -82,101 +93,50 @@ def run_dq_checks_df(fact_df, fact_table_name, config=config):
                     samples = [r[fk_col] for r in missing_df.limit(5).collect()]
                     referential_missing_values.extend(samples)
                     referential_issues.append(f"{fk_col} → {dim_table} ({count} missing, e.g. {samples})")
+                    # All records in fact_df with these FK values are referred errors
+                    referential_errors_count += fact_df.filter(col(fk_col).isin(samples)).count()
+                    ref_errors = fact_df.filter(col(fk_col).isin(samples)).withColumn("dq_error_type", lit(f"Referential Check on {fk_col}"))
+                    error_dfs.append(ref_errors)
             except Exception as e:
                 referential_issues.append(f"{fk_col} → {dim_table} (error: {str(e)})")
 
-        referential_check_passed = len(referential_issues) == 0
-        referential_status = "All passed" if referential_check_passed else "; ".join(referential_issues)
-
-    # ================== 4. Build Error DataFrame ==================
-    if null_violated_cols:
-        null_conds = [
-            (col(c).isNull() | isnan(col(c))) if isinstance(schema[c].dataType, NumericType)
-            else col(c).isNull() for c in null_violated_cols
-        ]
-        null_errors = fact_df.filter(reduce(lambda a, b: a | b, null_conds)) \
-                             .withColumn("dq_error_type", lit("Null Check"))
-        error_dfs.append(null_errors)
-
-    if not range_check_passed and config.get("enable_range_check", True) and range_filter is not None:
-        range_errors = fact_df.filter(range_filter).withColumn("dq_error_type", lit("Range Check"))
-        error_dfs.append(range_errors)
-
-    if not referential_check_passed and referential_missing_values:
-        for fk in config.get("foreign_keys", []):
-            fk_col = fk["fk_column"]
-            vals = [v for v in referential_missing_values if v is not None]
-            if fk_col in fact_df.columns:
-                ref_errors = fact_df.filter(col(fk_col).isin(vals)) \
-                                    .withColumn("dq_error_type", lit(f"Referential Check on {fk_col}"))
-                error_dfs.append(ref_errors)
-
-    # Combine to write error records
+    # =========== 4. Write Error Records ==========
     error_df = None
     if error_dfs:
         error_df = reduce(lambda a, b: a.unionByName(b), error_dfs).dropDuplicates()
-        error_tbl = f"dev.silver_ods.{fact_table_name.split('.')[-1]}_error"
+        error_tbl = f"{catalog}.{schema}.{fact_table_name.split('.')[-1]}_error"
 
-        if spark.catalog.tableExists(error_tbl):
-            write_mode = "append"
-        else:
-            write_mode = "overwrite"
-
-        # Write error records
-        error_df.write \
-            .mode(write_mode) \
-            .format("delta") \
-            .option("mergeSchema", "true") \
-            .saveAsTable(error_tbl)
-
+        write_mode = "append" if spark.catalog.tableExists(error_tbl) else "overwrite"
+        error_df.write.mode(write_mode).format("delta").option("mergeSchema", "true").saveAsTable(error_tbl)
         print(f"Error records {'appended to' if write_mode == 'append' else 'written to'} {error_tbl}")
     else:
-        print(" No error records to write.")
+        print("No error records to write.")
 
-    # ================== 5. Append Summary to dq_check ==================
-    null_errors_count = 0
-    range_errors_count = 0
-    referential_errors_count = 0
+    # =========== 5. Write Summary to dq_check ==========
+    total_error_records = null_errors_count + range_errors_count + referential_errors_count
 
-    if null_violated_cols:
-        null_conds = [
-            (col(c).isNull() | isnan(col(c))) if isinstance(schema[c].dataType, NumericType)
-            else col(c).isNull() for c in null_violated_cols
-        ]
-        null_errors_count = fact_df.filter(reduce(lambda a, b: a | b, null_conds)).count()
-
-    if config.get("enable_range_check", True) and range_filter is not None:
-        range_errors_count = fact_df.filter(range_filter).count()
-
-    if not referential_check_passed and referential_missing_values:
-        for fk in config.get("foreign_keys", []):
-            fk_col = fk["fk_column"]
-            vals = [v for v in referential_missing_values if v is not None]
-            if fk_col in fact_df.columns:
-                referential_errors_count += fact_df.filter(col(fk_col).isin(vals)).count()
-
-    summary_df = spark.createDataFrame([{
+    summary_data = [{
         "table_name": fact_table_name,
-        "null_check_passed": null_check_passed,
-        "null_violations": null_violation_result,
-        "null_errors_count": null_errors_count,  # NEW
-        "range_violations": range_violation_count,
-        "range_errors_count": range_errors_count,  # NEW
-        "referential_check_passed": referential_check_passed,
-        "referential_issues": referential_status,
-        "referential_errors_count": referential_errors_count,  # NEW
+        "null_check_enabled": null_check_enabled,
+        "null_error_count": null_errors_count,
+        "range_check_enabled": range_check_enabled,
+        "range_error_count": range_errors_count,
+        "referential_check_enabled": referential_check_enabled,
+        "referential_error_count": referential_errors_count,
         "total_records": fact_df.count(),
+        "total_error_records": total_error_records,
         "testing_ts": datetime.now()
-    }])
-
+    }]
+    summary_df = spark.createDataFrame(summary_data)
     summary_df.write.mode("append").format("delta").saveAsTable(f"{catalog}.{schema}.dq_check")
 
-    # ================== 6. Return Good Records ==================
+    # =========== 6. Return Good Records ==========
     if error_df:
         good_df = fact_df.subtract(error_df.drop("dq_error_type"))
         return good_df
     else:
         return fact_df
+
 
 
 
@@ -345,6 +305,21 @@ def run_dq_checks_vw(fact_table_name, config=config):
         return fact_df
 
 
+# ddl of the dq check table 
+
+# CREATE TABLE dev.silver_ods.dq_check (
+#     table_name STRING,
+#     null_check_enabled BOOLEAN,
+#     null_error_count INT,
+#     range_check_enabled BOOLEAN,
+#     range_error_count INT,
+#     referential_check_enabled BOOLEAN,
+#     referential_error_count INT,
+#     total_records BIGINT,
+#     total_error_records BIGINT,
+#     testing_ts TIMESTAMP
+# )
+# USING DELTA;
 
 
 
