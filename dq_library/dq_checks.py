@@ -19,11 +19,10 @@ schema = "silver_ods" # eg
 path_for_error_tbl = f"{catalog}.{schema}" 
 
 
-def run_dq_checks_df(fact_df, fact_table_name, config, catalog='dev', schema='silver_ods'):
+def run_dq_checks_df(fact_df, fact_table_name, config):
     error_dfs = []
     df_schema = fact_df.schema
 
-    # =========== Flags for which checks are enabled ==========
     null_check_enabled = config.get("enable_null_check", True)
     range_check_enabled = config.get("enable_range_check", True)
     referential_check_enabled = config.get("enable_referential_check", True)
