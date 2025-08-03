@@ -1,16 +1,19 @@
-# ======================================= v3 =============================================
+# ======================================= v4 =============================================
 # ============ 1. run_dq_checks_df or run_dq_checks_vw funtion to run check on df/view/tbl
 # ============ 2. Error tbls (<table_name>_error) to be created for each tbl =============
 # ============ 3. Append test result of each tbl to dq_check tbl  ========================
 # ============ 4. Return Good Records ====================================================
 
-from functools import reduce
-from pyspark.sql.functions import col, lit, isnan
-from pyspark.sql.types import NumericType
 from datetime import datetime
+from pyspark.sql.functions import col, count, isnan, lit, when
+from pyspark.sql.types import NumericType,LongType, DateType, TimestampType
+from pyspark.sql.types import StructType, StructField, StringType, BooleanType, IntegerType
+from functools import reduce
 import pyspark.sql.functions as F
 from .config import config
-from functools import reduce
+
+from pyspark.sql import SparkSession # not needed if used in databricks or fabric notebooks
+spark = SparkSession.builder.getOrCreate()
 
 
 # path of your choice where you want to save the error table.
@@ -47,12 +50,12 @@ def run_dq_checks_df(fact_df, fact_table_name, config):
                 else col(c).isNull() for c in null_violated_cols
             ]
             null_errors_count = fact_df.filter(reduce(lambda a, b: a | b, null_conds)).count()
-            null_errors = fact_df.filter(reduce(lambda a, b: a | b, null_conds)).withColumn("dq_error_type", lit("Null Check"))
+            null_errors = fact_df.filter(reduce(lambda a, b: a | b, null_conds)) \
+                                 .withColumn("dq_error_type", lit("Null Check").cast(StringType()))
             error_dfs.append(null_errors)
 
     # =========== 2. Range Checks ==========
     range_errors_count = 0
-    range_filter = None
 
     if range_check_enabled:
         try:
@@ -64,7 +67,8 @@ def run_dq_checks_df(fact_df, fact_table_name, config):
             )
             range_errors_count = fact_df.filter(range_filter).count()
             if range_errors_count > 0:
-                range_errors = fact_df.filter(range_filter).withColumn("dq_error_type", lit("Range Check"))
+                range_errors = fact_df.filter(range_filter) \
+                                      .withColumn("dq_error_type", lit("Range Check").cast(StringType()))
                 error_dfs.append(range_errors)
         except Exception as e:
             print(f"Range check failed: {e}")
@@ -92,9 +96,9 @@ def run_dq_checks_df(fact_df, fact_table_name, config):
                     samples = [r[fk_col] for r in missing_df.limit(5).collect()]
                     referential_missing_values.extend(samples)
                     referential_issues.append(f"{fk_col} → {dim_table} ({count} missing, e.g. {samples})")
-                    # All records in fact_df with these FK values are referred errors
                     referential_errors_count += fact_df.filter(col(fk_col).isin(samples)).count()
-                    ref_errors = fact_df.filter(col(fk_col).isin(samples)).withColumn("dq_error_type", lit(f"Referential Check on {fk_col}"))
+                    ref_errors = fact_df.filter(col(fk_col).isin(samples)) \
+                                        .withColumn("dq_error_type", lit(f"Referential Check on {fk_col}").cast(StringType()))
                     error_dfs.append(ref_errors)
             except Exception as e:
                 referential_issues.append(f"{fk_col} → {dim_table} (error: {str(e)})")
@@ -114,20 +118,36 @@ def run_dq_checks_df(fact_df, fact_table_name, config):
     # =========== 5. Write Summary to dq_check ==========
     total_error_records = null_errors_count + range_errors_count + referential_errors_count
 
+    summary_schema = StructType([
+    StructField("table_name", StringType(), True),
+    StructField("null_check_enabled", BooleanType(), True),
+    StructField("null_error_count", IntegerType(), True),
+    StructField("range_check_enabled", BooleanType(), True),
+    StructField("range_error_count", IntegerType(), True),
+    StructField("referential_check_enabled", BooleanType(), True),
+    StructField("referential_error_count", IntegerType(), True),
+    StructField("total_records", LongType(), True),
+    StructField("total_error_records", LongType(), True),
+    StructField("testing_ts", TimestampType(), True),
+])
+
     summary_data = [{
         "table_name": fact_table_name,
         "null_check_enabled": null_check_enabled,
-        "null_error_count": null_errors_count,
+        "null_error_count": int(null_errors_count),
         "range_check_enabled": range_check_enabled,
-        "range_error_count": range_errors_count,
+        "range_error_count": int(range_errors_count),
         "referential_check_enabled": referential_check_enabled,
-        "referential_error_count": referential_errors_count,
-        "total_records": fact_df.count(),
-        "total_error_records": total_error_records,
+        "referential_error_count": int(referential_errors_count),
+        "total_records": int(fact_df.count()),
+        "total_error_records": int(null_errors_count + range_errors_count + referential_errors_count),
         "testing_ts": datetime.now()
     }]
-    summary_df = spark.createDataFrame(summary_data)
+
+    summary_df = spark.createDataFrame(summary_data, schema=summary_schema)
+
     summary_df.write.mode("append").format("delta").saveAsTable(f"{catalog}.{schema}.dq_check")
+
 
     # =========== 6. Return Good Records ==========
     if error_df:
@@ -135,8 +155,6 @@ def run_dq_checks_df(fact_df, fact_table_name, config):
         return good_df
     else:
         return fact_df
-
-
 
 
 def run_dq_checks_vw(fact_table_name, config=config):

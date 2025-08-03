@@ -49,6 +49,22 @@ This enables end-to-end auditability and serves as a historical tracking table f
 Finally, the process subtracts all invalid records (those failing any rule) and returns a new DataFrame containing only valid/good records.
 
 This clean DataFrame can then be forwarded downstream for analytics, ML training, reporting, or transformation—in full confidence of its quality.
+
+DDL of the dq check table :
+
+# CREATE TABLE dev.silver_ods.dq_check (
+#     table_name STRING,
+#     null_check_enabled BOOLEAN,
+#     null_error_count INT,
+#     range_check_enabled BOOLEAN,
+#     range_error_count INT,
+#     referential_check_enabled BOOLEAN,
+#     referential_error_count INT,
+#     total_records BIGINT,
+#     total_error_records BIGINT,
+#     testing_ts TIMESTAMP
+# )
+# USING DELTA;
 ---
 
 ## 🔧 Installation
