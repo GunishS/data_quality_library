@@ -49,12 +49,11 @@ This enables end-to-end auditability and serves as a historical tracking table f
 Finally, the process subtracts all invalid records (those failing any rule) and returns a new DataFrame containing only valid/good records.
 
 This clean DataFrame can then be forwarded downstream for analytics, ML training, reporting, or transformation—in full confidence of its quality.
-
 ---
 
 ## 🔧 Installation
 
-Install directly using pip (GitHub-based install):
-pip install : pip install dq-library
+Install directly using pip:
+pip install dq-library
 
 

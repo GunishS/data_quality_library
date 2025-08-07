@@ -129,7 +129,7 @@ def run_dq_checks_df(fact_df, fact_table_name, config):
     StructField("total_records", LongType(), True),
     StructField("total_error_records", LongType(), True),
     StructField("testing_ts", TimestampType(), True),
-])
+    ])
 
     summary_data = [{
         "table_name": fact_table_name,
