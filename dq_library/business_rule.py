@@ -2,6 +2,7 @@ from pyspark.sql.functions import col, lit, isnan
 from pyspark.sql.types import *
 from datetime import datetime
 from functools import reduce
+from .config import config
 
 # ---- Data Quality class wrapper
 class DataQuality:
