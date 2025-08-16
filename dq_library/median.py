@@ -22,7 +22,7 @@ class median:
         # print(sorted_list) # obj create huya h so memory location print hoga 
         sorted_list = sorted_list.num_list # uss object ka num_list vla attribute access kr rha hu jo ke ek array h 
         # print(sorted_list) # array print hoga yha
-        # odd
+        # odd no of elements in the list
         if (len(sorted_list) % 2) != 0 :
             sorted_list_q1 = sorted_list[0 : (len(sorted_list)//2 )]
             sorted_list_q3 = sorted_list[(len(sorted_list)//2 + 1) : ]
@@ -36,7 +36,8 @@ class median:
             q1 = sorted_list_q1.calculate_median()
             q3 = sorted_list_q3.calculate_median()
             return [q1,med,q3]
-        else :
+        # even no of elements in the list
+        else : 
             sorted_list_q1 = sorted_list[0 : (len(sorted_list)//2 )]
             # print(sorted_list_q1)
             sorted_list_q3 = sorted_list[(len(sorted_list)//2) : ]
