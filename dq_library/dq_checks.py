@@ -320,7 +320,10 @@ def run_dq_checks_vw(fact_table_name, config=config):
         return good_df
     else:
         return fact_df
+    
 
+
+    
 
 # ddl of the dq check table 
 
