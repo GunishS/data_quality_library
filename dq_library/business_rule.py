@@ -386,8 +386,11 @@ class DataQuality:
 
 dq = DataQuality(catalog="dev", schema="silver_ods")
 
-# Run generic dq checks
+# Run generic dq checks on tbl/df
 good_df_1 = dq.run_dq_checks_df(fact_df, "invoice_line_item", config)
 
 # Run unrealistic quantity dq check
 good_df_2 = dq.unrealistic_quantity(fact_df, "invoice_line_item", config_business_rule)
+
+# Run generic dq check on view
+good_df_1 = dq.run_dq_checks_df(fact_df, "invoice_line_item", config)
